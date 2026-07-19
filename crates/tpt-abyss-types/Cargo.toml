@@ -1,0 +1,21 @@
+[package]
+name = "tpt-abyss-types"
+description = "Shared types for TPT Abyss: dynamic-depth layer programs, token/position types, reasoning traces, and verification results."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+keywords = ["llm", "inference", "dynamic-depth", "types", "reasoning"]
+categories = ["science"]
+readme = "README.md"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

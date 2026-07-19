@@ -1,0 +1,7 @@
+tpt-local-ai — The Model Toolkit
+What it has: HuggingFace model caching, LoRA weight merging, safetensors I/O, pure-Rust tokenization 
+What it needs:
+Table
+Upgrade	Priority	Description
+Router weight format	Medium	Define how router weights are stored/loaded (probably safetensors).
+LoRA for router	Low	Fine-tune the router via LoRA instead of full training.

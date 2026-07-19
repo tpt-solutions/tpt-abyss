@@ -1,0 +1,31 @@
+[package]
+name = "tpt-abyss-engine"
+description = "Non-sequential (dynamic-depth) LLM inference engine on candle with GGUF loading for TPT Abyss."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+keywords = ["llm", "inference", "gguf", "dynamic-depth", "candle"]
+categories = ["science"]
+readme = "README.md"
+
+[dependencies]
+tpt-abyss-types = { workspace = true }
+tpt-abyss-router = { workspace = true }
+candle-core = { workspace = true }
+candle-nn = { workspace = true }
+candle-transformers = { workspace = true }
+hf-hub = { workspace = true }
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+rand = { workspace = true }
+tokenizers = "0.20"
+
+[dev-dependencies]
+rand = { workspace = true }
+candle-core = { workspace = true }

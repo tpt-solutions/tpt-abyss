@@ -1,0 +1,7 @@
+tpt-boxcar — The Deployment Layer
+What it has: OCI + Wasm sandbox, eBPF observability, edge service mesh, API gateway 
+What it needs:
+Table
+Upgrade	Priority	Description
+8GB resource enforcement	Medium	Enforce memory limits for TPT Abyss instances.
+Model + router packaging	Low	OCI-compatible packaging for GGUF + router weights + Eve knowledge base.

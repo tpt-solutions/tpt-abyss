@@ -1,0 +1,18 @@
+[package]
+name = "tpt-abyss-verify"
+description = "From-scratch in-process symbolic reasoner/verifier for TPT Abyss reasoning traces."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+keywords = ["reasoning", "verification", "symbolic", "llm", "proof"]
+categories = ["science", "algorithms"]
+readme = "README.md"
+
+[dependencies]
+tpt-abyss-types = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }

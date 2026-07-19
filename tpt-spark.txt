@@ -1,0 +1,10 @@
+tpt-spark — The Big One
+What it has: GGUF inference, WebGPU shaders, local LLM chat, OpenAI-compatible API 
+What it needs:
+Table
+Upgrade	Priority	Description
+Non-sequential layer execution	CRITICAL	Currently runs layers 1→N. Need kernel that accepts a layer program array (e.g., [1,2,3,3,4,5]) and executes only those layers, with weight sharing for repeated layers.
+Router hook point	CRITICAL	Clean API between tokenizer and layer execution where the router injects its program. Something like spark.set_layer_program(program: &[usize]).
+Dynamic KV cache	High	KV cache must handle non-sequential execution. If layer 3 runs twice, its KV output needs special handling (don't double-cache).
+Layer activation logging	Medium	For training the router, log per-layer activation magnitudes during inference to a file.
+TPT GPU backend	Medium	Currently uses WebGPU/WGSL. Add tpt-gpu as an optional backend for production-quality GEMM/Attention.

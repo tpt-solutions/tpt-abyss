@@ -1,0 +1,10 @@
+tpt-eve — The Cognitive Layer
+What it has: Symbolic reasoning, causal inference, abstraction, active learning, meta-cognition. Runs locally via tpt-spark or Ollama 
+What it needs:
+Table
+Upgrade	Priority	Description
+Real-time verification API	CRITICAL	Sub-100ms API to verify a reasoning trace. Currently seems designed for offline/batch. Need verify(trace: &str) -> VerificationResult with confidence score.
+Reasoning trace parser	High	Parse chain-of-thought text into structured logical statements for verification.
+Neural-symbolic gRPC protocol	High	Define protobuf messages for Spark ↔ Eve communication.
+Feedback loop support	High	Accept correction constraints and return them in a format Spark can use for regeneration.
+Incremental learning from Keystone	Medium	Load past successful reasoning traces from Keystone to improve verification accuracy.

@@ -1,0 +1,7 @@
+tpt-abyss-router — The dynamic depth router.
+This is ~500-1000 lines of Rust that:
+Takes a token embedding as input
+Runs a tiny MLP (trained offline)
+Outputs a layer program (array of layer indices)
+Fits in <50MB, runs in <1ms on CPU
+Built on tpt-zero-* crates. No new dependencies.

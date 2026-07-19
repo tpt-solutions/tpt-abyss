@@ -1,0 +1,9 @@
+tpt-gpu — The Kernel Foundation
+What it has: 7-layer architecture, TPT Script language, TPTIR compiler, GEMM/Attention kernels, CUDA/ROCm/Metal support 
+What it needs:
+Table
+Upgrade	Priority	Description
+Layer program execution kernel	CRITICAL	New kernel that takes a layer index array and executes only those layers. This is the core of dynamic depth.
+Memory barrier optimization	High	Non-sequential execution means different memory access patterns. Optimize for jumping between layers.
+Router-aware prefetching	Medium	If router predicts layers 4-6 will be needed, preload them into cache while executing earlier layers.
+TPTIR unification with tpt-crucible	Low	Roadmap item: unified IR so models compile once, run anywhere (GPU, FPGA, etc.). Not needed for MVP.

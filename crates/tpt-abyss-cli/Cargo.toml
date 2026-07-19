@@ -1,0 +1,36 @@
+[package]
+name = "tpt-abyss-cli"
+description = "End-to-end CLI for TPT Abyss: dynamic-depth generation with symbolic verification and persistent memory."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+keywords = ["llm", "cli", "inference", "dynamic-depth", "reasoning"]
+categories = ["command-line-utilities", "science"]
+readme = "README.md"
+default-run = "tpt-abyss"
+
+[dependencies]
+tpt-abyss-types = { workspace = true }
+tpt-abyss-router = { workspace = true }
+tpt-abyss-engine = { workspace = true }
+tpt-abyss-verify = { workspace = true }
+tpt-abyss-memory = { workspace = true, optional = true }
+tokio = { workspace = true }
+clap = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[features]
+default = ["memory"]
+memory = ["dep:tpt-abyss-memory"]
+
+[[bin]]
+name = "tpt-abyss"
+path = "src/main.rs"

@@ -1,0 +1,9 @@
+tpt-zero-* (bytes, text, formal) — FOUNDATION Upgrades
+Current state: no_std, zero-heap, panic-free primitives 
+Upgrades needed for the router:
+Table
+Feature	Which Layer	Why	Effort
+Fixed-point MLP inference	text (math)	Router runs MLP with no float alloc	1-2 weeks
+Compact layer program serialization	bytes	Binary format for [1,2,3,3,4]	2-3 days
+Router weight format loader	bytes	Load safetensors-style router weights	3-4 days
+Deterministic router verification	formal	Prove router doesn't panic	1 week

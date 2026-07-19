@@ -1,0 +1,10 @@
+tpt-keystone-db — The Memory Layer
+What it has: Multi-engine DB (relational, geospatial, graph, vector, time-series, document, event-streaming), Postgres wire-compatible, MCP server, WASM UDFs 
+What it needs:
+Table
+Upgrade	Priority	Description
+Reasoning trace schema	High	Define tables/collections for: reasoning_traces (embedding, trace_text, success_score, task_type, timestamp).
+Causal relationship graph	High	Schema for causal_relationships (cause_node, effect_node, confidence, discovery_session).
+Similarity search API	High	Given a problem embedding, retrieve top-K similar past reasoning traces.
+Session state API	Medium	Load/save agent reasoning state across sessions.
+Time-series quality tracking	Low	Track reasoning accuracy per task type over time.
