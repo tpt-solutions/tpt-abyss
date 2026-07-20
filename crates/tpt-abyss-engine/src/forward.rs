@@ -22,7 +22,8 @@ fn rms_norm(x: &Tensor, weight: &Tensor, eps: f32) -> Result<Tensor> {
     let x = x.to_dtype(DType::F32)?;
     let variance = x.sqr()?.mean_keepdim(D::Minus1)?;
     let denom_term = variance.sqrt()?;
-    let eps_t = Tensor::new(eps, x.device())?;
+    // Build eps as a scalar-shaped tensor that broadcasts against [b, seq, 1].
+    let eps_t = Tensor::new(&[eps], x.device())?.broadcast_as(denom_term.shape())?;
     let denominator = (&denom_term + &eps_t)?;
     let x = x.broadcast_div(&denominator)?;
     let x = x.to_dtype(x_dtype)?;
@@ -31,9 +32,9 @@ fn rms_norm(x: &Tensor, weight: &Tensor, eps: f32) -> Result<Tensor> {
 }
 
 fn silu(x: &Tensor) -> Result<Tensor> {
-    let one = Tensor::new(1.0f32, x.device())?;
-    let inner = (&x.neg()?.exp()? + &one)?.recip()?;
-    x.broadcast_mul(&inner)
+    // SiLU(x) = x * sigmoid(x).
+    let sig = candle_nn::ops::sigmoid(x)?;
+    x.broadcast_mul(&sig)
 }
 
 fn repeat_kv(x: &Tensor, repeat: usize) -> Result<Tensor> {
@@ -69,18 +70,22 @@ fn run_block(
     activations: &mut Vec<(LayerId, f32)>,
     layer_id: LayerId,
 ) -> Result<Tensor> {
-    let (b, seq, _hidden) = x.dims3()?;
+    let (b, seq, hidden) = x.dims3()?;
     let n_heads = cfg.num_attn_heads;
     let n_kv = cfg.num_kv_heads;
     let head_dim = cfg.head_dim;
     let rope_dims = cfg.rope_dims;
+    let device = x.device();
 
     // --- self attention ---
     let residual = x.clone();
-    let x = rms_norm(x, &w.attn_norm, cfg.rms_norm_eps)?;
-    let q = x.matmul(&w.attn_q.t()?)?; // (b, seq, n_heads*head_dim)
-    let k = x.matmul(&w.attn_k.t()?)?; // (b, seq, n_kv*head_dim)
-    let v = x.matmul(&w.attn_v.t()?)?;
+    // Flatten (b, seq, hidden) -> (b*seq, hidden) for the linear projections so
+    // the matmul is a plain 2D matrix multiply (robust across candle versions).
+    let x2 = x.reshape((b * seq, hidden))?;
+    let xn = rms_norm(&x2, &w.attn_norm, cfg.rms_norm_eps)?;
+    let q = xn.matmul(&w.attn_q.t()?)?; // (b*seq, n_heads*head_dim)
+    let k = xn.matmul(&w.attn_k.t()?)?; // (b*seq, n_kv*head_dim)
+    let v = xn.matmul(&w.attn_v.t()?)?;
 
     let q = q.reshape((b, seq, n_heads, head_dim))?.transpose(1, 2)?;
     let k = k.reshape((b, seq, n_kv, head_dim))?.transpose(1, 2)?;
@@ -88,13 +93,14 @@ fn run_block(
     // (b, nh, seq, head_dim)
 
     // RoPE on q and k (rotate first rope_dims dims).
-    let cos_sin = build_rope(seq, rope_dims, index_pos, cfg.rope_theta, &x.device())?;
+    let cos_sin = build_rope(seq, rope_dims, index_pos, cfg.rope_theta, device)?;
     let (cos, sin) = cos_sin;
     let q = rotary_emb::rope_i_slow(&q, &cos, &sin)?;
     let k = rotary_emb::rope_i_slow(&k, &cos, &sin)?;
 
-    // append this step's k/v to the layer's own cache
-    cache.append(&k, &v)?;
+    // append this step's k/v to the layer's own cache (drop the batch dim;
+    // the cache stores per-layer (n_kv, seq, head_dim) state).
+    cache.append(&k.squeeze(0)?, &v.squeeze(0)?)?;
     let (ck, cv) = cache.kv();
     let k_full = ck.unsqueeze(0)?; // (1, n_kv, total, hd)
     let v_full = cv.unsqueeze(0)?;
@@ -106,22 +112,27 @@ fn run_block(
 
     let scale = 1.0 / (head_dim as f64).sqrt();
     let scores = q.matmul(&k_rep.t()?)?; // (1, nh, seq, total)
-    let scale_t = Tensor::new(scale as f32, scores.device())?;
+    let scale_t = Tensor::new(&[scale as f32], scores.device())?.broadcast_as(scores.shape())?;
     let scores = scores.broadcast_mul(&scale_t)?;
-    let mask = causal_mask(seq, total, &x.device())?;
+    let mask = causal_mask(seq, total, device)?;
     let scores = scores.broadcast_add(&mask.unsqueeze(0)?.unsqueeze(0)?)?;
     let attn = candle_nn::ops::softmax(&scores, D::Minus1)?;
     let ctx = attn.matmul(&v_rep)?; // (1, nh, seq, hd)
     let ctx = ctx.transpose(1, 2)?.reshape((b, seq, n_heads * head_dim))?;
-    let attn_out = ctx.matmul(&w.attn_output.t()?)?;
+    let attn_out = ctx
+        .reshape((b * seq, n_heads * head_dim))?
+        .matmul(&w.attn_output.t()?)?;
+    let attn_out = attn_out.reshape((b, seq, hidden))?;
     let x = residual.broadcast_add(&attn_out)?;
 
     // --- mlp ---
     let residual2 = x.clone();
-    let x = rms_norm(&x, &w.ffn_norm, cfg.rms_norm_eps)?;
-    let gate = x.matmul(&w.ffn_gate.t()?)?;
-    let up = x.matmul(&w.ffn_up.t()?)?;
-    let x = silu(&gate)?.matmul(&w.ffn_down.t()?)?;
+    let x2 = x.reshape((b * seq, hidden))?;
+    let xn = rms_norm(&x2, &w.ffn_norm, cfg.rms_norm_eps)?;
+    let gate = xn.matmul(&w.ffn_gate.t()?)?;
+    let up = xn.matmul(&w.ffn_up.t()?)?;
+    let x = silu(&gate)?.broadcast_mul(&up)?.matmul(&w.ffn_down.t()?)?;
+    let x = x.reshape((b, seq, hidden))?;
     let x = residual2.broadcast_add(&x)?;
 
     let mag = x.abs()?.mean_all()?.to_scalar::<f32>()?;
@@ -194,9 +205,9 @@ pub fn forward_program(
 
     let x_last = x.get(0)?; // (seq, hidden)
     let x_last = x_last.get(seq - 1)?; // (hidden,)
-    let x_last = x_last.unsqueeze(0)?.unsqueeze(0)?; // (1, 1, hidden)
+    let x_last = x_last.unsqueeze(0)?; // (1, hidden)
     let x_norm = rms_norm(&x_last, &model.final_norm, cfg.rms_norm_eps)?;
-    let logits = x_norm.matmul(&model.lm_head.t()?)?; // (1, 1, vocab)
-    let logits = logits.squeeze(1)?; // (1, vocab)
+    let logits = x_norm.matmul(&model.lm_head.t()?)?; // (1, vocab)
+    let logits = logits.squeeze(0)?; // (vocab,)
     Ok((logits, activations))
 }

@@ -15,8 +15,13 @@
 
 use redb::{Database, ReadableTable, TableDefinition};
 use std::path::Path;
+use std::path::PathBuf;
+use std::sync::atomic::AtomicU64;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tpt_abyss_types::AbyssError;
+
+/// Counter used to give each `open_temp` store a unique file name.
+static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 const TRACES: TableDefinition<&str, &[u8]> = TableDefinition::new("reasoning_traces");
 const CAUSAL: TableDefinition<&str, &[u8]> = TableDefinition::new("causal_relationships");
@@ -58,6 +63,17 @@ pub struct QualitySample {
 /// Handle to the persistent memory store.
 pub struct MemoryStore {
     db: Database,
+    /// If this store was opened via [`MemoryStore::open_temp`], the backing file
+    /// path so it can be removed on drop.
+    temp_path: Option<PathBuf>,
+}
+
+impl Drop for MemoryStore {
+    fn drop(&mut self) {
+        if let Some(path) = &self.temp_path {
+            let _ = std::fs::remove_file(path);
+        }
+    }
 }
 
 impl MemoryStore {
@@ -80,12 +96,24 @@ impl MemoryStore {
         }
         wtx.commit()
             .map_err(|e| AbyssError::Memory(e.to_string()))?;
-        Ok(Self { db })
+        Ok(Self {
+            db,
+            temp_path: None,
+        })
     }
 
     /// Open an in-memory (temporary) store, useful for tests.
     pub fn open_temp() -> Result<Self, AbyssError> {
-        let db = Database::create("").map_err(|e| AbyssError::Memory(e.to_string()))?;
+        // redb needs a concrete file path; use a unique file in the OS temp dir
+        // and remove it when the store is dropped.
+        let dir = std::env::temp_dir();
+        let path = dir.join(format!(
+            "tpt-abyss-memory-{}-{}.redb",
+            std::process::id(),
+            TEMP_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ));
+        let _ = std::fs::remove_file(&path);
+        let db = Database::create(&path).map_err(|e| AbyssError::Memory(e.to_string()))?;
         let wtx = db
             .begin_write()
             .map_err(|e| AbyssError::Memory(e.to_string()))?;
@@ -101,7 +129,10 @@ impl MemoryStore {
         }
         wtx.commit()
             .map_err(|e| AbyssError::Memory(e.to_string()))?;
-        Ok(Self { db })
+        Ok(Self {
+            db,
+            temp_path: Some(path),
+        })
     }
 
     fn now_ms() -> u64 {
@@ -150,7 +181,7 @@ impl MemoryStore {
             .map_err(|e| AbyssError::Memory(e.to_string()))?
         {
             Some(bytes) => {
-                let rec = serde_json::from_slice(&bytes.value()).map_err(AbyssError::Json)?;
+                let rec = serde_json::from_slice(bytes.value()).map_err(AbyssError::Json)?;
                 Ok(Some(rec))
             }
             None => Ok(None),
@@ -177,7 +208,7 @@ impl MemoryStore {
             .map_err(|e| AbyssError::Memory(e.to_string()))?
         {
             let (k, v) = entry.map_err(|e| AbyssError::Memory(e.to_string()))?;
-            let emb: Vec<f32> = serde_json::from_slice(&v.value()).map_err(AbyssError::Json)?;
+            let emb: Vec<f32> = serde_json::from_slice(v.value()).map_err(AbyssError::Json)?;
             let sim = cosine(query, &emb);
             scored.push((k.value().to_string(), sim));
         }
@@ -218,7 +249,7 @@ impl MemoryStore {
             .map_err(|e| AbyssError::Memory(e.to_string()))?
         {
             let (_, v) = entry.map_err(|e| AbyssError::Memory(e.to_string()))?;
-            out.push(serde_json::from_slice(&v.value()).map_err(AbyssError::Json)?);
+            out.push(serde_json::from_slice(v.value()).map_err(AbyssError::Json)?);
         }
         Ok(out)
     }
@@ -262,7 +293,7 @@ impl MemoryStore {
             .map_err(|e| AbyssError::Memory(e.to_string()))?
         {
             let (_, v) = entry.map_err(|e| AbyssError::Memory(e.to_string()))?;
-            let s: QualitySample = serde_json::from_slice(&v.value()).map_err(AbyssError::Json)?;
+            let s: QualitySample = serde_json::from_slice(v.value()).map_err(AbyssError::Json)?;
             if s.task_type == task_type {
                 sum += s.score;
                 n += 1;

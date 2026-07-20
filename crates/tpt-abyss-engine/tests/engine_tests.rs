@@ -21,7 +21,7 @@ fn forward_sequential_matches_depth() {
     let tokens = vec![1u32, 2, 3];
     let program = LayerProgram::sequential(4).unwrap();
     let (logits, acts) = forward_program(&model, &program, &tokens, 0, &mut kv, &dev).unwrap();
-    assert_eq!(logits.dims(), &[1, 64]);
+    assert_eq!(logits.dims(), &[64]);
     assert_eq!(acts.len(), 4, "one activation entry per executed layer");
 }
 
@@ -100,10 +100,13 @@ fn non_sequential_program_changes_output_vs_sequential() {
 fn engine_generate_runs_and_logs_activations() {
     let dev = Device::Cpu;
     let model = small_model(&dev);
-    let mut engine = Engine::from_weights(model, EngineConfig::default());
-    let mut cfg = EngineConfig::default();
-    cfg.temperature = 0.0;
-    let mut engine = Engine::from_weights(engine.into_model(), cfg);
+    let cfg = EngineConfig {
+        max_context: 2048,
+        temperature: 0.0,
+        top_k: 40,
+        top_p: 0.95,
+    };
+    let mut engine = Engine::from_weights(model, cfg);
     let out = engine.generate(&[1, 2, 3], 8, None).unwrap();
     assert_eq!(out.len(), 8);
     // Activation log should have one entry per generated step.

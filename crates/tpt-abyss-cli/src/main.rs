@@ -120,7 +120,7 @@ fn main() -> Result<(), tpt_abyss_types::AbyssError> {
             println!("{report}");
         }
         Commands::Evaluate { offline, strategy } => {
-            let report = evaluate(*offline, &strategy);
+            let report = evaluate(*offline, strategy);
             println!("{report}");
         }
     }
@@ -264,7 +264,6 @@ fn bench(engine: &mut Engine, max_tokens: usize) -> Result<String, tpt_abyss_typ
     let dyn_t = t0.elapsed();
 
     engine.reset();
-    let seq_prog = LayerProgram::sequential(depth).unwrap();
     // run sequential via a hook forcing the sequential program
     let hook: tpt_abyss_engine::RouterHook =
         Box::new(move |_r, _len, _logits, _res| LayerProgram::sequential(depth));

@@ -254,7 +254,7 @@ impl Engine {
             let mut idx: Vec<usize> = (0..scaled.len()).collect();
             idx.sort_by(|a, b| scaled[*b].partial_cmp(&scaled[*a]).unwrap());
             let thresh = scaled[idx[self.config.top_k]];
-            for (i, s) in scaled.iter_mut().enumerate() {
+            for s in scaled.iter_mut() {
                 if *s < thresh {
                     *s = f32::NEG_INFINITY;
                 }
@@ -277,7 +277,7 @@ impl Engine {
             *s /= sum;
         }
         // categorical sample
-        let mut rng = fast_rng();
+        let rng = fast_rng();
         let r = rng / (u32::MAX as f32);
         let mut cum = 0.0f32;
         for (i, &p) in scaled.iter().enumerate() {

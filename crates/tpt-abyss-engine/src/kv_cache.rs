@@ -81,6 +81,10 @@ impl KvCachePool {
         self.layers.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.layers.is_empty()
+    }
+
     /// Reset all caches (start of a fresh sequence).
     pub fn clear(&mut self) {
         for l in &mut self.layers {

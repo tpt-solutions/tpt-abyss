@@ -4,8 +4,11 @@
 
 use crate::model::{BlockWeights, ModelConfig, ModelWeights};
 use candle_core::{DType, Device, Result, Tensor};
+use rand::rngs::StdRng;
+use rand::SeedableRng;
 
 /// Build a minimal random model with the given hyper-parameters.
+#[allow(clippy::too_many_arguments)]
 pub fn synthetic_model(
     num_layers: usize,
     hidden: usize,
@@ -32,7 +35,7 @@ pub fn synthetic_model(
         tie_word_embeddings: true,
     };
 
-    let mut rng = rand::thread_rng();
+    let mut rng = StdRng::seed_from_u64(0xAB55_1555);
 
     let mut r = || -> f32 { rand::Rng::gen_range(&mut rng, -0.1..0.1) };
 

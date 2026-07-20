@@ -13,6 +13,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Root `README.md` with architecture diagram and quick-start.
 - `CONTRIBUTING.md` with dev workflow and publishing order.
 
+### Verified (v0.1.0 release prep)
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets --all-features -D warnings`,
+  and `cargo test --workspace --all-features` all pass clean.
+- `cargo publish --dry-run` succeeds for `tpt-abyss-types` (root of the dependency
+  graph); downstream crates package cleanly and resolve once `types` is published.
+- All six crate names (`tpt-abyss-{types,router,engine,verify,memory,cli}`) are
+  available on crates.io.
+- Router latency benchmark: ~446 ns/token (easy) and ~286 ns/token (hard) on CPU —
+  well under the <1 ms/token target.
+- CLI `evaluate --offline` end-to-end demo of the verify-then-regenerate loop passes.
+
 ### Changed
 - `tpt-abyss-memory` is now feature-gated in `tpt-abyss-cli` (default on;
   `--no-default-features` to disable) so core crates build without it.

@@ -3,6 +3,12 @@ use tpt_abyss_types::{ReasoningStep, ReasoningTrace, Violation};
 /// Checks arithmetic computation steps for correctness.
 pub struct ArithmeticChecker;
 
+impl Default for ArithmeticChecker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ArithmeticChecker {
     pub fn new() -> Self {
         Self

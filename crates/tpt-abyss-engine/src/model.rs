@@ -9,7 +9,6 @@
 use candle_core::quantized::gguf_file::{Content, Value};
 use candle_core::{DType, Device, Result, Tensor};
 use std::io::Seek;
-use tpt_abyss_types::AbyssError;
 
 pub const DEFAULT_NEGATIVE_100: f32 = -100.0;
 

@@ -1,4 +1,4 @@
-use tpt_abyss_types::{AbyssResult, LayerId, LayerProgram, LayerProgramBuilder};
+use tpt_abyss_types::{AbyssResult, LayerProgram, LayerProgramBuilder};
 
 use crate::features::{RouterFeatures, RouterFeaturesBuilder};
 

@@ -48,6 +48,7 @@ pub fn softmax(v: &mut [f32]) {
 
 /// Returns the index of the maximum element, or `None` if empty.
 #[inline]
+#[allow(dead_code)]
 pub fn argmax(v: &[f32]) -> Option<usize> {
     v.iter()
         .enumerate()
@@ -61,6 +62,7 @@ pub fn argmax(v: &[f32]) -> Option<usize> {
 
 /// Clip `x` to `[lo, hi]`.
 #[inline]
+#[allow(dead_code)]
 pub fn clip(x: f32, lo: f32, hi: f32) -> f32 {
     x.max(lo).min(hi)
 }

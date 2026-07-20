@@ -1,4 +1,4 @@
-use tpt_abyss_router::{HeuristicRouter, RouterConfig, RouterConfigBuilder};
+use tpt_abyss_router::{HeuristicRouter, RouterConfigBuilder};
 use tpt_abyss_types::{LayerProgram, Position, TokenId};
 
 fn router() -> HeuristicRouter {
@@ -41,10 +41,10 @@ fn produced_program_is_valid() {
     for pos in 0..50u32 {
         let p = r
             .route_token(
-                TokenId(pos as u32 * 7),
+                TokenId(pos * 7),
                 Position(pos),
-                (pos as f32 / 50.0),
-                (pos as f32 / 50.0),
+                pos as f32 / 50.0,
+                pos as f32 / 50.0,
                 pos % 11 == 0,
             )
             .unwrap();

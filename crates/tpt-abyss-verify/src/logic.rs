@@ -12,6 +12,12 @@ pub struct ContradictionDetector {
     claims: HashMap<String, f64>,
 }
 
+impl Default for ContradictionDetector {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ContradictionDetector {
     pub fn new() -> Self {
         Self {
@@ -59,15 +65,19 @@ impl ContradictionDetector {
     }
 }
 
-/// Extract a `var = number` claim from text (e.g. "total = 36").
+/// Extract a `var = number` claim from text (e.g. "total = 36" or "let x = 10").
+///
+/// The variable is taken to be the last whitespace-delimited word before the
+/// `=`, so qualifiers like "let"/"now" are ignored and `x` matches across steps.
 fn extract_claim(text: &str) -> Option<(String, f64)> {
     let lower = text.to_ascii_lowercase();
     if let Some(eq) = lower.find('=') {
-        let var = lower[..eq].trim().to_string();
-        let val = lower[eq + 1..].trim().split_whitespace().next()?;
+        let lhs = lower[..eq].trim();
+        let var = lhs.split_whitespace().next_back()?.to_string();
+        let val = lower[eq + 1..].split_whitespace().next()?.trim();
         if let Ok(v) = val.parse::<f64>() {
-            if !var.is_empty() && var.chars().all(|c| c.is_alphanumeric() || c == ' ') {
-                return Some((var.replace(' ', "_"), v));
+            if !var.is_empty() && var.chars().all(|c| c.is_alphanumeric()) {
+                return Some((var, v));
             }
         }
     }

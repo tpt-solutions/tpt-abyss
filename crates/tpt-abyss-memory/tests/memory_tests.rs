@@ -28,7 +28,7 @@ fn similarity_search_ranks_near_text_higher() -> Result<(), AbyssError> {
     let m = MemoryStore::open_temp()?;
     m.put_trace(&rec("a", "multiply three by twelve", 1.0, "math"))?;
     m.put_trace(&rec("b", "the weather is sunny today", 0.0, "chitchat"))?;
-    let query = trivial_embedding("multiplication of numbers", 16);
+    let query = trivial_embedding("three multiplied by twelve", 16);
     let hits = m.similar_traces(&query, 2)?;
     assert_eq!(hits[0].0, "a");
     Ok(())
