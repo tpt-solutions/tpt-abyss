@@ -4,7 +4,12 @@
 [advisories]
 version = 2
 yanked = "deny"
-ignore = []
+ignore = [
+    # paste and number_prefix are unmaintained but have no safe upgrade; they
+    # are pulled in transitively via gemm/tokenizers and indicatif respectively.
+    "RUSTSEC-2024-0436",
+    "RUSTSEC-2025-0119",
+]
 
 [licenses]
 version = 2
@@ -22,6 +27,9 @@ allow = [
     "MPL-2.0",
     "CC0-1.0",
     "OpenSSL",
+    # webpki-roots (transitive via ureq/hf-hub) uses CDLA-Permissive-2.0,
+    # a permissive data-sharing license compatible with our distribution.
+    "CDLA-Permissive-2.0",
 ]
 confidence-threshold = 0.8
 exceptions = []
