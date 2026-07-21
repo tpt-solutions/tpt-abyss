@@ -5,7 +5,6 @@
 
 use clap::{Parser, Subcommand};
 use tpt_abyss_engine::{Engine, EngineConfig};
-use tpt_abyss_router::HeuristicRouter;
 use tpt_abyss_types::{LayerProgram, Position, TokenId};
 use tpt_abyss_verify::{parse_trace, verify};
 use tracing_subscriber::EnvFilter;
@@ -33,6 +32,14 @@ struct Cli {
     /// Tokens per second / latency target verbosity.
     #[arg(long, global = true)]
     verbose: bool,
+
+    /// Sampling temperature (0 = greedy/argmax). Default 0.8.
+    #[arg(long, global = true, default_value_t = 0.8)]
+    temperature: f32,
+
+    /// Greedy decoding (equivalent to --temperature 0).
+    #[arg(long, global = true)]
+    greedy: bool,
 }
 
 #[derive(Subcommand)]
@@ -48,6 +55,14 @@ enum Commands {
         /// Force a sequential (static) baseline run for comparison.
         #[arg(long)]
         sequential: bool,
+        /// Use the dynamic-depth heuristic router (repeats focal layers for hard
+        /// tokens). Off by default: the default run is the coherent sequential
+        /// baseline, since untrained small models degrade under layer repeats.
+        #[arg(long)]
+        dynamic: bool,
+        /// Prompt format: `raw` (default) or `chat` (Qwen2 chat template).
+        #[arg(long, default_value = "raw")]
+        format: String,
     },
     /// Run the self-correction test-time compute loop on a prompt.
     Solve {
@@ -96,15 +111,21 @@ fn main() -> Result<(), tpt_abyss_types::AbyssError> {
             prompt,
             max_tokens,
             sequential,
+            dynamic,
+            format,
         } => {
             let mut engine = build_engine(&cli)?;
             let tok_path = cli.tokenizer.clone();
+            let temp = if cli.greedy { 0.0 } else { cli.temperature };
             let out = generate(
                 &mut engine,
                 tok_path.as_deref(),
                 prompt,
                 *max_tokens,
                 *sequential,
+                *dynamic,
+                format,
+                temp,
             )?;
             println!("{out}");
         }
@@ -134,35 +155,66 @@ fn generate(
     prompt: &str,
     max_tokens: usize,
     sequential: bool,
+    dynamic: bool,
+    format: &str,
+    temperature: f32,
 ) -> Result<String, tpt_abyss_types::AbyssError> {
+    let prompt_text = if format == "chat" {
+        qwen_chat_prompt(prompt)
+    } else {
+        prompt.to_string()
+    };
     let (prompt_tokens, tok) = match tokenizer {
         Some(p) => {
             let t = tpt_abyss_engine::Tokenizer::from_file(p)?;
-            (t.encode(prompt)?, Some(t))
+            (t.encode(&prompt_text)?, Some(t))
         }
         None => {
             // No tokenizer: encode as raw byte-ish ids (dev fallback).
-            let ids: Vec<u32> = prompt.bytes().map(|b| b as u32).collect();
+            let ids: Vec<u32> = prompt_text.bytes().map(|b| b as u32).collect();
             (ids, None)
         }
     };
 
-    // Use the router hook for dynamic depth (or force sequential).
+    // Default: sequential (coherent) baseline. `--dynamic` enables the
+    // heuristic router that repeats focal layers for hard tokens; `--sequential`
+    // forces the baseline explicitly. TPT_PROG still overrides for diagnosis.
     let depth = engine.num_layers() as u32;
-    let router = HeuristicRouter::new(
-        tpt_abyss_router::RouterConfig::builder()
-            .model_depth(depth)
-            .build(),
-    );
-    let hook: tpt_abyss_engine::RouterHook = if sequential {
+    let use_dynamic = dynamic && !sequential;
+    let mode = if sequential {
+        "sequential"
+    } else if use_dynamic {
+        "dynamic"
+    } else {
+        "sequential"
+    };
+    engine.set_config_temperature(temperature);
+    // Adopt the tokenizer's EOS so generation stops cleanly (Qwen2 uses
+    // `<|im_end|>`, not the default Llama id 2).
+    if let Some(t) = &tok {
+        if let Some(eos) = t.eos_token_id() {
+            engine.set_config_eos(eos);
+        }
+    }
+    let hook: tpt_abyss_engine::RouterHook = if !use_dynamic {
         Box::new(move |_r, _len, _logits, _res| LayerProgram::sequential(depth))
     } else {
         Box::new(move |r, len, _logits, _res| {
+            // Diagnostic override: TPT_PROG="1,2,3,3,4" forces an explicit
+            // layer program for every step.
+            if let Ok(s) = std::env::var("TPT_PROG") {
+                let prog: Result<Vec<_>, _> = s
+                    .split(',')
+                    .map(|t| t.trim().parse::<u32>().map(tpt_abyss_types::LayerId))
+                    .collect();
+                if let Ok(ids) = prog {
+                    return LayerProgram::new(ids, depth);
+                }
+            }
             r.route_token(TokenId(1), Position(len as u32), 0.7, 0.6, false)
                 .or_else(|_| LayerProgram::sequential(depth))
         })
     };
-    let _ = &router;
 
     let t0 = std::time::Instant::now();
     let generated = engine.generate(&prompt_tokens, max_tokens, Some(&hook))?;
@@ -181,7 +233,7 @@ fn generate(
         generated.len(),
         elapsed,
         tps,
-        if sequential { "sequential" } else { "dynamic" }
+        mode
     ))
 }
 
@@ -310,4 +362,14 @@ fn evaluate(offline: bool, strategy: &str) -> String {
         outcomes.push(outcome);
     }
     summarize(&outcomes)
+}
+
+/// Wrap a user prompt in the Qwen2 chat template (instruct models expect this
+/// for sensible completions). Keeps the explicit `<|im_end|>` turn boundaries.
+fn qwen_chat_prompt(user: &str) -> String {
+    format!(
+        "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n\
+         <|im_start|>user\n{user}<|im_end|>\n\
+         <|im_start|>assistant\n"
+    )
 }

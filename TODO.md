@@ -81,3 +81,48 @@ Dynamic-depth + symbolic-verified LLM inference, built entirely from scratch (no
 - [x] CHANGELOG entries for every published crate
 - [ ] Tag `v0.1.0`, publish in order: `types` → `router` → `engine` → `verify` → `memory` → `cli`
 - [ ] Post-release smoke test: `cargo install tpt-abyss-cli` from crates.io in a clean environment, run a generation
+
+## Phase 7 — Layer-Aware CPU/GPU Offloading (large model on small VRAM, no quantization)
+
+Goal: run a full-precision model much larger than available VRAM (e.g. 32GB model on an
+8GB GPU) by keeping only actively-used layers GPU-resident and streaming the rest from
+CPU RAM/disk, using the engine's existing one-token-ahead `LayerProgram` and per-layer
+`ActivationLog` as scheduling signals instead of a static `--n-gpu-layers`-style split.
+
+### Phase 7.1 — Lazy loading + prefetch plumbing (CPU-only, no GPU required)
+- [x] Add `memmap2` workspace + `tpt-abyss-engine` dependency
+- [x] Switch GGUF loading in `engine.rs::load_gguf_with_config` from `BufReader<File>` to an
+      `memmap2::Mmap`-backed `Cursor`, avoiding a full upfront buffered read
+- [x] Make block materialization lazy (dequantize-on-first-use, cached) instead of eagerly
+      dequantizing every block to f32 at load time (`crates/tpt-abyss-engine/src/model.rs`)
+- [x] Background prefetch worker in `engine.rs`: since `choose_program` computes token N+1's
+      `LayerProgram` before token N's `step()` finishes, kick off materialization of upcoming
+      layers on a background thread ahead of when `forward_program` needs them
+- [x] Wire the engine's real `ActivationLog` (currently computed in `forward.rs` but discarded)
+      into `Engine::choose_program`, replacing the hardcoded `0.3, 0.3, false` placeholders
+- [x] Add a `layer_selection_counts`-style helper in `tpt-abyss-router` capturing which
+      `LayerId`s the repeat-window actually selects, as a usage-telemetry foundation for 7.3
+- [x] `cargo build --release` / `--no-default-features` and existing test suites still pass
+- [x] Verify `generate`/`solve`/`bench` CLI behavior is unchanged (transparent internal refactor)
+
+### Phase 7.2 — Real GPU per-layer placement (needs a CUDA-capable dev box)
+- [x] `cuda` Cargo feature on `tpt-abyss-engine` forwarding to `candle-core/cuda`
+- [x] `DeviceSpec`/`ResidencyPlan` types; `EngineConfig` device selection replacing the
+      hardcoded `Device::Cpu` in `engine.rs`
+- [x] Per-layer device placement in `model.rs` (some blocks GPU-resident, some CPU-resident)
+- [x] Per-layer device-aware `KvCachePool`/`LayerKvCache` (`kv_cache.rs`) — GPU-resident
+      layer's KV stays on GPU, CPU-resident layer's KV stays on CPU
+- [ ] GPU prefetch worker: overlap CPU→GPU transfer of upcoming layers with current-layer
+      compute (investigate candle-core 0.8's async/multi-stream transfer support first —
+      flagged as the riskiest unknown)
+- [x] Start with a static, config-specified residency split (llama.cpp `--n-gpu-layers`
+      equivalent) to validate correctness before adding adaptivity
+
+### Phase 7.3 — Telemetry-driven adaptive residency (stretch)
+- [x] `LayerUsageStats`: EMA of router selection frequency + activation magnitude per layer
+- [ ] Warm-up/calibration pass, periodic top-K repin of GPU-resident layers by usage score
+- [ ] Atomic weight+KV migration on repin (avoid stale-KV-on-wrong-device races)
+
+Honest caveats (see plan/design notes): this trades speed for fitting a large model at full
+precision into small VRAM — it will not match a model that fits entirely in VRAM, and a
+regime shift mid-generation could cause residency thrashing without careful repin tuning.

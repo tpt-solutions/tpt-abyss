@@ -20,7 +20,8 @@ fn forward_sequential_matches_depth() {
 
     let tokens = vec![1u32, 2, 3];
     let program = LayerProgram::sequential(4).unwrap();
-    let (logits, acts) = forward_program(&model, &program, &tokens, 0, &mut kv, &dev).unwrap();
+    let (logits, acts) =
+        forward_program(&model, &program, &tokens, 0, &mut kv, &dev, None).unwrap();
     assert_eq!(logits.dims(), &[64]);
     assert_eq!(acts.len(), 4, "one activation entry per executed layer");
 }
@@ -43,7 +44,7 @@ fn repeated_layer_grows_its_own_kv_cache() {
     )
     .unwrap();
     let tokens = vec![5u32, 6];
-    let _ = forward_program(&model, &program, &tokens, 0, &mut kv, &dev).unwrap();
+    let _ = forward_program(&model, &program, &tokens, 0, &mut kv, &dev, None).unwrap();
 
     // Layer 3 (0-based 2) ran twice => its KV cache length is seq(2)*2 = 4.
     assert_eq!(kv.layer(2).len(), 4, "repeated layer accumulates KV");
@@ -73,6 +74,7 @@ fn non_sequential_program_changes_output_vs_sequential() {
         0,
         &mut kv_seq,
         &dev,
+        None,
     )
     .unwrap();
 
@@ -88,7 +90,8 @@ fn non_sequential_program_changes_output_vs_sequential() {
         4,
     )
     .unwrap();
-    let (dyn_logits, _) = forward_program(&model, &program, &tokens, 0, &mut kv_dyn, &dev).unwrap();
+    let (dyn_logits, _) =
+        forward_program(&model, &program, &tokens, 0, &mut kv_dyn, &dev, None).unwrap();
 
     let a: Vec<f32> = seq_logits.to_vec1().unwrap();
     let b: Vec<f32> = dyn_logits.to_vec1().unwrap();
@@ -105,6 +108,7 @@ fn engine_generate_runs_and_logs_activations() {
         temperature: 0.0,
         top_k: 40,
         top_p: 0.95,
+        eos_token_id: 2,
     };
     let mut engine = Engine::from_weights(model, cfg);
     let out = engine.generate(&[1, 2, 3], 8, None).unwrap();

@@ -17,7 +17,9 @@
 mod features;
 mod heuristic;
 mod math;
+mod telemetry;
 
 pub use features::{RouterFeatures, RouterFeaturesBuilder};
 pub use heuristic::{HeuristicRouter, RouterConfig, RouterConfigBuilder};
 pub use math::{matvec, softmax};
+pub use telemetry::LayerSelectionStats;

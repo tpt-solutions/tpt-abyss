@@ -72,8 +72,11 @@ impl RouterConfigBuilder {
 /// The router emits a [`LayerProgram`] per token. Its current policy:
 /// - Always run layers 1..=depth once (the backbone).
 /// - If the token looks "hard" (high logit entropy or high residual
-///   magnitude), repeat a mid-layer window up to `max_repeat` times, allocating
-///   more compute where it matters.
+///   magnitude), repeat a single focal layer once to allocate a little extra
+///   compute where it matters. Repeating is kept light (one extra pass of one
+///   layer) so the program still tracks the model's trained distribution; the
+///   capability to repeat arbitrary windows is fully supported by the engine
+///   and is what later phases (trained routers) will exploit.
 /// - Bound total length by `max_program_len`.
 ///
 /// The policy is intentionally a pure function of [`RouterFeatures`] so it can
@@ -126,13 +129,12 @@ impl HeuristicRouter {
         let residual = (f.values[3] + 1.0) / 2.0;
         let hardness = entropy.max(residual).clamp(0.0, 1.0);
 
-        // Number of extra full passes over a focal mid-window for hard tokens.
+        // How many extra single-layer passes to add for a hard token. Kept to
+        // at most one so the program stays close to the trained distribution.
         let extra_passes = if hardness >= self.cfg.hard_entropy.max(self.cfg.hard_residual) {
-            self.cfg.max_repeat.saturating_sub(1)
+            1
         } else if hardness >= 0.4 {
-            (((self.cfg.max_repeat.saturating_sub(1)) as f32) * hardness)
-                .round()
-                .max(0.0) as usize
+            1
         } else {
             0
         };
@@ -142,17 +144,14 @@ impl HeuristicRouter {
         for l in 1..=depth {
             b = b.layer(l);
         }
-        // Repeat a focal mid-window for hard tokens, capped by max_program_len.
-        if extra_passes > 0 {
-            let mid = (depth / 2).max(1);
-            let window = [(mid.saturating_sub(1)).max(1), mid, (mid + 1).min(depth)];
-            // How many repetitions fit before hitting the cap?
-            let max_extra = self.cfg.max_program_len.saturating_sub(depth as usize) / window.len();
-            let passes = extra_passes.min(max_extra);
-            for _ in 0..passes {
-                for &l in &window {
-                    b = b.layer(l);
-                }
+        // Repeat a single focal layer once for hard tokens, capped by
+        // max_program_len. The focal layer is a late layer (near the top of the
+        // stack), which gives a modest extra-compute signal without destabilising
+        // the residual stream.
+        if extra_passes > 0 && (depth as usize + 1) <= self.cfg.max_program_len {
+            let focal = depth; // 1-based last layer
+            for _ in 0..extra_passes {
+                b = b.layer(focal);
             }
         }
         b.build()

@@ -39,6 +39,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 redb = "2"
 rand = "0.8"
+memmap2 = "0.9"
 
 [profile.release]
 opt-level = 3

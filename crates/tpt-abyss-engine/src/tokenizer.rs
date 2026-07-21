@@ -35,4 +35,15 @@ impl Tokenizer {
             .map_err(|e| tpt_abyss_types::AbyssError::Engine(format!("decode: {e}")))?;
         Ok(text)
     }
+
+    /// Resolve the model's end-of-sequence token id, trying common special
+    /// token strings. Returns `None` if none are present in the vocabulary.
+    pub fn eos_token_id(&self) -> Option<u32> {
+        for sym in ["<|im_end|>", "<|endoftext|>", "</s>", "<|end_of_text|>"] {
+            if let Some(id) = self.inner.token_to_id(sym) {
+                return Some(id);
+            }
+        }
+        None
+    }
 }

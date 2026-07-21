@@ -19,9 +19,15 @@ pub mod tokenizer;
 
 pub mod synthetic;
 
+pub mod device_placement;
+pub mod usage_stats;
+
 pub use engine::{Engine, EngineConfig, RouterHook};
 
 pub use forward::{forward_program, ActivationLog};
 pub use kv_cache::{KvCachePool, LayerKvCache};
-pub use model::{BlockWeights, ModelConfig, ModelWeights};
+pub use model::{BlockWeights, GgufSource, ModelConfig, ModelWeights};
 pub use tokenizer::Tokenizer;
+
+pub use device_placement::{DeviceSpec, LayerResidency, ResidencyPlan};
+pub use usage_stats::LayerUsageStats;

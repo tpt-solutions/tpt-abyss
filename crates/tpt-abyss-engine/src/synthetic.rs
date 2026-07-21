@@ -3,7 +3,7 @@
 //! can be validated quickly. Not used in production.
 
 use crate::model::{BlockWeights, ModelConfig, ModelWeights};
-use candle_core::{DType, Device, Result, Tensor};
+use candle_core::{Device, Result, Tensor};
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 
@@ -57,6 +57,9 @@ pub fn synthetic_model(
             attn_q: t(&[n_heads * head_dim, hidden], device, &mut r)?,
             attn_k: t(&[n_kv * head_dim, hidden], device, &mut r)?,
             attn_v: t(&[n_kv * head_dim, hidden], device, &mut r)?,
+            attn_q_bias: None,
+            attn_k_bias: None,
+            attn_v_bias: None,
             attn_output: t(&[hidden, n_heads * head_dim], device, &mut r)?,
             ffn_up: t(&[ffn, hidden], device, &mut r)?,
             ffn_gate: t(&[ffn, hidden], device, &mut r)?,
@@ -64,12 +67,5 @@ pub fn synthetic_model(
         });
     }
 
-    let _ = DType::F32;
-    Ok(ModelWeights {
-        cfg,
-        embeddings,
-        blocks,
-        final_norm,
-        lm_head,
-    })
+    ModelWeights::from_blocks(cfg, embeddings, blocks, final_norm, lm_head, device)
 }
