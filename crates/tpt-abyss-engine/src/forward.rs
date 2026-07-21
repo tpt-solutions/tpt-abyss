@@ -72,6 +72,7 @@ fn causal_mask(seq: usize, total: usize, device: &Device) -> Result<Tensor> {
 /// executes multiple times in a `LayerProgram` accumulates more history.
 /// The `append_kv` flag is currently always true (every execution appends);
 /// it exists as a hook for future fine-grained KV management if needed.
+#[allow(clippy::too_many_arguments)]
 fn run_block(
     w: &crate::model::BlockWeights,
     cfg: &crate::model::ModelConfig,
@@ -246,6 +247,7 @@ pub fn forward_program(
                     }
                     #[cfg(not(feature = "cuda"))]
                     {
+                        let _ = ordinal;
                         device.clone()
                     }
                 }

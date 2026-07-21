@@ -131,13 +131,12 @@ impl HeuristicRouter {
 
         // How many extra single-layer passes to add for a hard token. Kept to
         // at most one so the program stays close to the trained distribution.
-        let extra_passes = if hardness >= self.cfg.hard_entropy.max(self.cfg.hard_residual) {
-            1
-        } else if hardness >= 0.4 {
-            1
-        } else {
-            0
-        };
+        let extra_passes =
+            if hardness >= self.cfg.hard_entropy.max(self.cfg.hard_residual) || hardness >= 0.4 {
+                1
+            } else {
+                0
+            };
 
         let mut b = LayerProgramBuilder::with_depth(depth);
         // Backbone: sequential 1..=depth.

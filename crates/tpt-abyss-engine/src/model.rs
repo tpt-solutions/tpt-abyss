@@ -59,6 +59,40 @@ pub struct BlockWeights {
     pub ffn_down: Tensor,
 }
 
+impl BlockWeights {
+    /// Clone this block's weights onto a different device (e.g. CPU→GPU).
+    /// Used by `materialize_block` to transfer pre-dequantized CPU blocks
+    /// to the target GPU device.
+    pub fn clone_to_device(&self, device: &Device) -> Result<Self> {
+        Ok(Self {
+            attn_norm: self.attn_norm.to_device(device)?,
+            ffn_norm: self.ffn_norm.to_device(device)?,
+            attn_q: self.attn_q.to_device(device)?,
+            attn_k: self.attn_k.to_device(device)?,
+            attn_v: self.attn_v.to_device(device)?,
+            attn_q_bias: self
+                .attn_q_bias
+                .as_ref()
+                .map(|t| t.to_device(device))
+                .transpose()?,
+            attn_k_bias: self
+                .attn_k_bias
+                .as_ref()
+                .map(|t| t.to_device(device))
+                .transpose()?,
+            attn_v_bias: self
+                .attn_v_bias
+                .as_ref()
+                .map(|t| t.to_device(device))
+                .transpose()?,
+            attn_output: self.attn_output.to_device(device)?,
+            ffn_up: self.ffn_up.to_device(device)?,
+            ffn_gate: self.ffn_gate.to_device(device)?,
+            ffn_down: self.ffn_down.to_device(device)?,
+        })
+    }
+}
+
 /// Metadata for a single block needed to materialize its weights from the GGUF
 /// file on demand. Each `GgufTensorMeta` stores the tensor name so we can look
 /// it up in the GGUF content's tensor registry and dequantize it lazily.
@@ -69,7 +103,7 @@ struct GgufTensorMeta {
 
 /// Metadata for all weights in a single transformer block.
 #[derive(Debug, Clone)]
-struct BlockMeta {
+pub(crate) struct BlockMeta {
     attn_norm: GgufTensorMeta,
     ffn_norm: GgufTensorMeta,
     attn_q: GgufTensorMeta,
@@ -142,8 +176,12 @@ impl GgufSource {
 pub struct ModelWeights {
     pub cfg: ModelConfig,
     pub embeddings: Tensor, // (vocab, hidden) — materialized eagerly (needed immediately)
-    blocks_meta: Vec<BlockMeta>,
+    pub(crate) blocks_meta: Vec<BlockMeta>,
     block_cache: Mutex<HashMap<usize, BlockWeights>>,
+    /// CPU-side prefetch cache shared between the background prefetch worker
+    /// and the main thread. The worker dequantizes blocks to CPU here; the
+    /// main thread pulls pre-dequantized blocks and transfers to GPU.
+    cpu_block_cache: std::sync::Arc<Mutex<HashMap<usize, BlockWeights>>>,
     pub final_norm: Tensor, // materialized eagerly
     pub lm_head: Tensor,    // materialized eagerly
     source: GgufSource,
@@ -232,6 +270,7 @@ impl ModelWeights {
             embeddings,
             blocks_meta,
             block_cache: Mutex::new(block_cache),
+            cpu_block_cache: std::sync::Arc::new(Mutex::new(HashMap::new())),
             final_norm,
             lm_head,
             source,
@@ -271,12 +310,10 @@ fn get_string(meta: &std::collections::HashMap<String, Value>, key: &str) -> Opt
 /// Look up a tensor name in the GGUF content, returning the first match from
 /// `candidates` that exists in the tensor registry.
 fn find_tensor_name<'a>(content: &Content, candidates: &'a [&str]) -> Option<&'a str> {
-    for c in candidates {
-        if content.tensor_infos.contains_key(*c) {
-            return Some(c);
-        }
-    }
-    None
+    candidates
+        .iter()
+        .find(|c| content.tensor_infos.contains_key(**c))
+        .map(|v| *v as _)
 }
 
 impl ModelConfig {
@@ -520,6 +557,7 @@ impl ModelWeights {
             embeddings,
             blocks_meta,
             block_cache: Mutex::new(HashMap::new()),
+            cpu_block_cache: std::sync::Arc::new(Mutex::new(HashMap::new())),
             final_norm,
             lm_head,
             source,
@@ -716,6 +754,7 @@ impl ModelWeights {
             embeddings,
             blocks_meta,
             block_cache: Mutex::new(block_cache),
+            cpu_block_cache: std::sync::Arc::new(Mutex::new(HashMap::new())),
             final_norm,
             lm_head,
             source,
@@ -725,12 +764,32 @@ impl ModelWeights {
     /// Materialize a single block from the GGUF file, caching the result.
     /// Thread-safe: concurrent calls for different block ids proceed in parallel;
     /// duplicate calls for the same id will serialize on the Mutex.
+    ///
+    /// Check order:
+    /// 1. `block_cache` — already materialized (possibly on target device)
+    /// 2. `cpu_block_cache` — pre-dequantized by background prefetch worker,
+    ///    transfer to target device via `clone_to_device` (fast H2D copy)
+    /// 3. Dequantize from GGUF mmap (slow path, ~100-200ms)
     pub fn materialize_block(&self, block_idx: usize, device: &Device) -> Result<BlockWeights> {
-        // Fast path: already cached.
+        // Fast path 1: already cached on the target device.
         {
             let cache = self.block_cache.lock().unwrap();
             if let Some(bw) = cache.get(&block_idx) {
                 return Ok(bw.clone());
+            }
+        }
+        // Fast path 2: pre-dequantized by the background prefetch worker on CPU.
+        // Transfer to target device via clone_to_device (fast H2D, ~5-20ms).
+        {
+            let cpu_cache = self.cpu_block_cache.lock().unwrap();
+            if let Some(bw) = cpu_cache.get(&block_idx) {
+                let bw = bw.clone_to_device(device)?;
+                drop(cpu_cache);
+                self.block_cache
+                    .lock()
+                    .unwrap()
+                    .insert(block_idx, bw.clone());
+                return Ok(bw);
             }
         }
         // Slow path: dequantize from the mmap.
@@ -769,49 +828,74 @@ impl ModelWeights {
         self.source.clone()
     }
 
+    /// Return a reference to the CPU-side prefetch cache. The background
+    /// prefetch worker dequantizes blocks here on CPU; the main thread
+    /// pulls pre-dequantized blocks and transfers to GPU via `to_device()`.
+    pub fn cpu_block_cache_ref(&self) -> &Mutex<HashMap<usize, BlockWeights>> {
+        &self.cpu_block_cache
+    }
+
+    /// Clone the CPU-side prefetch cache Arc for use by the background thread.
+    /// Both the worker and main thread share the same underlying HashMap.
+    pub fn cpu_block_cache(&self) -> std::sync::Arc<Mutex<HashMap<usize, BlockWeights>>> {
+        std::sync::Arc::clone(&self.cpu_block_cache)
+    }
+
     /// Dequantize a single block's tensors from the GGUF file.
     fn dequantize_block(&self, block_idx: usize, device: &Device) -> Result<BlockWeights> {
-        let meta = &self.blocks_meta[block_idx];
-        let mut cursor = self.source.cursor();
-        let content = &self.source.content;
-
-        let attn_norm = dequantize_meta(content, &mut cursor, device, &meta.attn_norm)?;
-        let ffn_norm = dequantize_meta(content, &mut cursor, device, &meta.ffn_norm)?;
-        let attn_q = dequantize_meta(content, &mut cursor, device, &meta.attn_q)?;
-        let attn_k = dequantize_meta(content, &mut cursor, device, &meta.attn_k)?;
-        let attn_v = dequantize_meta(content, &mut cursor, device, &meta.attn_v)?;
-        let attn_q_bias = match &meta.attn_q_bias {
-            Some(m) => Some(dequantize_meta(content, &mut cursor, device, m)?),
-            None => None,
-        };
-        let attn_k_bias = match &meta.attn_k_bias {
-            Some(m) => Some(dequantize_meta(content, &mut cursor, device, m)?),
-            None => None,
-        };
-        let attn_v_bias = match &meta.attn_v_bias {
-            Some(m) => Some(dequantize_meta(content, &mut cursor, device, m)?),
-            None => None,
-        };
-        let attn_output = dequantize_meta(content, &mut cursor, device, &meta.attn_output)?;
-        let ffn_up = dequantize_meta(content, &mut cursor, device, &meta.ffn_up)?;
-        let ffn_gate = dequantize_meta(content, &mut cursor, device, &meta.ffn_gate)?;
-        let ffn_down = dequantize_meta(content, &mut cursor, device, &meta.ffn_down)?;
-
-        Ok(BlockWeights {
-            attn_norm,
-            ffn_norm,
-            attn_q,
-            attn_k,
-            attn_v,
-            attn_q_bias,
-            attn_k_bias,
-            attn_v_bias,
-            attn_output,
-            ffn_up,
-            ffn_gate,
-            ffn_down,
-        })
+        dequantize_block_from_source(&self.source, &self.blocks_meta, block_idx, device)
     }
+}
+
+/// Dequantize a single block from the GGUF source. Standalone function
+/// usable by both `ModelWeights::dequantize_block` and the background
+/// prefetch worker (which doesn't hold `&ModelWeights`).
+pub(crate) fn dequantize_block_from_source(
+    source: &GgufSource,
+    blocks_meta: &[BlockMeta],
+    block_idx: usize,
+    device: &Device,
+) -> Result<BlockWeights> {
+    let meta = &blocks_meta[block_idx];
+    let mut cursor = source.cursor();
+    let content = &source.content;
+
+    let attn_norm = dequantize_meta(content, &mut cursor, device, &meta.attn_norm)?;
+    let ffn_norm = dequantize_meta(content, &mut cursor, device, &meta.ffn_norm)?;
+    let attn_q = dequantize_meta(content, &mut cursor, device, &meta.attn_q)?;
+    let attn_k = dequantize_meta(content, &mut cursor, device, &meta.attn_k)?;
+    let attn_v = dequantize_meta(content, &mut cursor, device, &meta.attn_v)?;
+    let attn_q_bias = match &meta.attn_q_bias {
+        Some(m) => Some(dequantize_meta(content, &mut cursor, device, m)?),
+        None => None,
+    };
+    let attn_k_bias = match &meta.attn_k_bias {
+        Some(m) => Some(dequantize_meta(content, &mut cursor, device, m)?),
+        None => None,
+    };
+    let attn_v_bias = match &meta.attn_v_bias {
+        Some(m) => Some(dequantize_meta(content, &mut cursor, device, m)?),
+        None => None,
+    };
+    let attn_output = dequantize_meta(content, &mut cursor, device, &meta.attn_output)?;
+    let ffn_up = dequantize_meta(content, &mut cursor, device, &meta.ffn_up)?;
+    let ffn_gate = dequantize_meta(content, &mut cursor, device, &meta.ffn_gate)?;
+    let ffn_down = dequantize_meta(content, &mut cursor, device, &meta.ffn_down)?;
+
+    Ok(BlockWeights {
+        attn_norm,
+        ffn_norm,
+        attn_q,
+        attn_k,
+        attn_v,
+        attn_q_bias,
+        attn_k_bias,
+        attn_v_bias,
+        attn_output,
+        ffn_up,
+        ffn_gate,
+        ffn_down,
+    })
 }
 
 /// Dequantize a single tensor by its GGUF metadata name.

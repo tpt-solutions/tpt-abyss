@@ -149,6 +149,7 @@ fn main() -> Result<(), tpt_abyss_types::AbyssError> {
 }
 
 /// Generate with the dynamic router, or a static sequential baseline.
+#[allow(clippy::too_many_arguments)]
 fn generate(
     engine: &mut Engine,
     tokenizer: Option<&str>,

@@ -57,7 +57,7 @@ impl LayerSelectionStats {
     /// All layers with their selection counts, sorted by count descending.
     pub fn ranked(&self) -> Vec<(LayerId, usize)> {
         let mut entries: Vec<_> = self.counts.iter().map(|(&l, &c)| (l, c)).collect();
-        entries.sort_by(|a, b| b.1.cmp(&a.1));
+        entries.sort_by_key(|b| std::cmp::Reverse(b.1));
         entries
     }
 

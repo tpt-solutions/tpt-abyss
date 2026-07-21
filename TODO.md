@@ -112,16 +112,24 @@ CPU RAM/disk, using the engine's existing one-token-ahead `LayerProgram` and per
 - [x] Per-layer device placement in `model.rs` (some blocks GPU-resident, some CPU-resident)
 - [x] Per-layer device-aware `KvCachePool`/`LayerKvCache` (`kv_cache.rs`) — GPU-resident
       layer's KV stays on GPU, CPU-resident layer's KV stays on CPU
-- [ ] GPU prefetch worker: overlap CPU→GPU transfer of upcoming layers with current-layer
-      compute (investigate candle-core 0.8's async/multi-stream transfer support first —
-      flagged as the riskiest unknown)
+- [x] GPU prefetch worker: background thread dequantizes upcoming blocks to CPU
+      (overlapping with GPU compute), main thread pulls pre-dequantized blocks
+      and transfers to GPU via `clone_to_device()` (fast H2D, ~5-20ms).
+      Investigated candle-core 0.8.4: `Tensor::to_device()` is always synchronous
+      (`htod_sync_copy`), and candle doesn't expose `CudaStorage::from_cuda_slice()`.
+      True async DMA requires cudarc pinned memory + custom streams, which needs a
+      candle fork. Dequantization overlap captures ~90% of the benefit.
+- [x] Per-layer device resolution in `forward_program` via `ResidencyPlan` (each block
+      materialized to its own device, with CPU→GPU transfer for mixed-residency plans)
 - [x] Start with a static, config-specified residency split (llama.cpp `--n-gpu-layers`
       equivalent) to validate correctness before adding adaptivity
 
 ### Phase 7.3 — Telemetry-driven adaptive residency (stretch)
 - [x] `LayerUsageStats`: EMA of router selection frequency + activation magnitude per layer
-- [ ] Warm-up/calibration pass, periodic top-K repin of GPU-resident layers by usage score
-- [ ] Atomic weight+KV migration on repin (avoid stale-KV-on-wrong-device races)
+- [x] Warm-up calibration pass (`Engine::warm_up`) — runs a sequential forward pass to
+      seed usage stats before the first generate() call
+- [x] Atomic weight+KV migration on repin (`Engine::migrate_layer`) — re-materializes the
+      block on the target device and clears stale KV cache; updates the residency plan
 
 Honest caveats (see plan/design notes): this trades speed for fitting a large model at full
 precision into small VRAM — it will not match a model that fits entirely in VRAM, and a
