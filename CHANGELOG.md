@@ -28,6 +28,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `tpt-abyss-memory` is now feature-gated in `tpt-abyss-cli` (default on;
   `--no-default-features` to disable) so core crates build without it.
 
+### Fixed
+- CI and documented dev commands no longer pass `--all-features`, which was
+  pulling in `tpt-abyss-engine`'s `cuda` feature (→ `cudarc` → `nvcc`) on
+  runners/dev boxes without a CUDA toolkit installed, failing the build. The
+  `cuda` feature remains available via `cargo build -p tpt-abyss-engine
+  --features cuda` on CUDA-capable machines.
+
 ## [0.1.0] - 2026-07-20
 
 Initial workspace skeleton and first crates.

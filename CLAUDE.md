@@ -16,16 +16,18 @@ doc (`TODO.md` tracks phased implementation status against it).
 ## Commands
 
 ```bash
-# Build (memory subsystem is default-on; omit --all-features flag as needed)
-cargo build --workspace --all-features
+# Build (memory subsystem is default-on; do NOT pass --all-features here —
+# it pulls in tpt-abyss-engine's `cuda` feature, which needs nvcc/CUDA
+# toolkit and fails on regular dev boxes and CI runners)
+cargo build --workspace
 cargo build --release --no-default-features   # without tpt-abyss-memory
 
 # Format / lint — CI fails on either
 cargo fmt --all -- --check
-cargo clippy --all-targets --all-features -- -D warnings
+cargo clippy --workspace --all-targets -- -D warnings
 
 # Tests
-cargo test --workspace --all-features
+cargo test --workspace
 cargo test -p tpt-abyss-engine                 # single crate
 cargo test -p tpt-abyss-router router_tests     # single test file/name filter
 
@@ -33,7 +35,10 @@ cargo test -p tpt-abyss-router router_tests     # single test file/name filter
 cargo bench -p tpt-abyss-router
 
 # License/advisory check (mirrors CI's cargo-deny job)
-cargo deny check --all-features
+cargo deny check
+
+# On a CUDA-capable dev box only, opt into GPU layer placement:
+cargo build -p tpt-abyss-engine --features cuda
 
 # Run the CLI (needs a local GGUF model, e.g. under models/)
 cargo run --bin tpt-abyss -- generate --model models/<file>.gguf --prompt "..."

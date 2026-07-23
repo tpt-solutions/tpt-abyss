@@ -35,13 +35,13 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
       - name: Build
-        run: cargo build --workspace --all-features
+        run: cargo build --workspace
 
       - name: Test
-        run: cargo test --workspace --all-features
+        run: cargo test --workspace
 
   deny:
     name: license / advisory check
@@ -52,4 +52,3 @@ jobs:
         uses: EmbarkStudios/cargo-deny-action@v2
         with:
           command: check
-          arguments: --all-features
